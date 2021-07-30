@@ -98,15 +98,21 @@ type fileWithCloser struct {
 }
 
 // mergeFilesInto merges sorted files into dst while maintaining sorted state via priorityQueue
-func mergeFilesInto(files []fileWithCloser, dst io.Writer) error {
+func mergeFilesInto(files []fileWithCloser, l int, dst io.Writer) error {
 	defer func() {
-		for _, f := range files {
+		for i, f := range files {
+			if i >= l {
+				break
+			}
 			f.c()
 		}
 	}()
 
-	var h priorityQueue
+	var h priorityQueue // TODO remove dynamic allocations
 	for i, file := range files {
+		if i >= l {
+			break
+		}
 		if file.f.Scan() {
 			h = append(h, pqElement{fileIndex: i, line: file.f.Text()})
 		}
@@ -154,6 +160,9 @@ func LinesInPlace(maxLinesInMem int, manager FileOpener) error {
 		if err != nil {
 			return err
 		}
+		if pos < maxLinesInMem {
+			buf = buf[:pos]
+		}
 		sort.Strings(buf)
 		for _, l := range buf {
 			_, err := file.Write([]byte(l + "\n"))
@@ -169,7 +178,7 @@ func LinesInPlace(maxLinesInMem int, manager FileOpener) error {
 
 	// Create n / k temporary k-sized sorted files
 	for original.Scan() {
-		if pos + 1 >= maxLinesInMem {
+		if pos >= maxLinesInMem {
 			if err := dumpBuf(); err != nil {
 				return err
 			}
@@ -177,7 +186,7 @@ func LinesInPlace(maxLinesInMem int, manager FileOpener) error {
 		buf[pos] = original.Text()
 		pos++
 	}
-	if len(buf) > 0 {
+	if pos > 0 {
 		if err := dumpBuf(); err != nil {
 			return err
 		}
@@ -207,18 +216,18 @@ func LinesInPlace(maxLinesInMem int, manager FileOpener) error {
 		if err != nil {
 			return err
 		}
-		if err := mergeFilesInto(files, f); err != nil {
+		defer c()
+		if err := mergeFilesInto(files, pos, f); err != nil {
 			return err
 		}
-		c()
 		pos = 0
 		return nil
 	}
 
-	// merge k files at the time until one left
-	for currentLevelFiles > 1 {
+	// merge k files at the end
+	for {
 		for i := 0; i < currentLevelFiles; i++ {
-			if pos + 1 >= maxLinesInMem {
+			if pos >= maxLinesInMem {
 				if err := mergeFiles(); err != nil {
 					return err
 				}
@@ -230,7 +239,7 @@ func LinesInPlace(maxLinesInMem int, manager FileOpener) error {
 			files[pos] = fileWithCloser{f:f, c:c}
 			pos++
 		}
-		if len(files) > 0 {
+		if pos > 0 {
 			if err := mergeFiles(); err != nil {
 				return err
 			}
@@ -242,24 +251,4 @@ func LinesInPlace(maxLinesInMem int, manager FileOpener) error {
 		currentLevelFiles = newCurrentFiles
 		newCurrentFiles = 0
 	}
-
-
-
-	// move single last file into old one
-	dst, dstCloser, err := manager.NewTempFile(0, 0)
-	if err != nil {
-		return err
-	}
-	defer dstCloser()
-	src, srcCloser, err := manager.GetTempFile(age, 0)
-	if err != nil {
-		return err
-	}
-	defer srcCloser()
-	for src.Scan() {
-		if _, err := dst.Write([]byte(src.Text() + "\n")); err != nil {
-			return err
-		}
-	}
-	return nil
 }

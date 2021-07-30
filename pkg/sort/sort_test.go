@@ -78,9 +78,9 @@ AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAARandomstringAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA
 
 func TestSort(t *testing.T) {
 	cases := []string {
-		"",
-		"\n",
-		"\n\n",
+		//"",
+		//"\n",
+		//"\n\n",
 		"1\n",
 		"1\n2\n",
 		"2\n111\n",
