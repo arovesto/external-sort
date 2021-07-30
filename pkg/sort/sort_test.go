@@ -120,7 +120,7 @@ func BenchmarkSort(b *testing.B) {
 
 	runTest := func() {
 		b.StopTimer()
-		dir, err := os.MkdirTemp(".", "test*")
+		dir, err := os.MkdirTemp("", "test*")
 		if err != nil {
 			b.Fatal("failed to create dir")
 		}
