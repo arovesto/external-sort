@@ -145,7 +145,8 @@ func LinesInPlace(maxLinesInMem int, manager FileOpener) error {
 		return err
 	}
 
-	buf := make([]string, 0, maxLinesInMem)
+	buf := make([]string, maxLinesInMem)
+	pos := 0
 	var currentLevelFiles int
 
 	dumpBuf := func() error {
@@ -160,7 +161,7 @@ func LinesInPlace(maxLinesInMem int, manager FileOpener) error {
 				return err
 			}
 		}
-		buf = make([]string, 0, maxLinesInMem)
+		pos = 0
 		c()
 		currentLevelFiles++
 		return nil
@@ -168,12 +169,13 @@ func LinesInPlace(maxLinesInMem int, manager FileOpener) error {
 
 	// Create n / k temporary k-sized sorted files
 	for original.Scan() {
-		if len(buf) == maxLinesInMem {
+		if pos + 1 >= maxLinesInMem {
 			if err := dumpBuf(); err != nil {
 				return err
 			}
 		}
-		buf = append(buf, original.Text())
+		buf[pos] = original.Text()
+		pos++
 	}
 	if len(buf) > 0 {
 		if err := dumpBuf(); err != nil {
@@ -189,10 +191,19 @@ func LinesInPlace(maxLinesInMem int, manager FileOpener) error {
 
 	age := 1
 	newCurrentFiles := 0
-	files := make([]fileWithCloser, 0, maxLinesInMem)
+	files := make([]fileWithCloser, maxLinesInMem)
+	pos = 0
 
-	mergeFiles := func() error{
-		f, c, err := manager.NewTempFile(age+1, newCurrentFiles)
+	mergeFiles := func() (err error) {
+		var f io.Writer
+		var c func()
+
+		if currentLevelFiles <= maxLinesInMem {
+			f, c, err = manager.NewTempFile(0, 0)
+		} else {
+			f, c, err = manager.NewTempFile(age+1, newCurrentFiles)
+			newCurrentFiles++
+		}
 		if err != nil {
 			return err
 		}
@@ -200,15 +211,14 @@ func LinesInPlace(maxLinesInMem int, manager FileOpener) error {
 			return err
 		}
 		c()
-		files = make([]fileWithCloser, 0, maxLinesInMem)
-		newCurrentFiles++
+		pos = 0
 		return nil
 	}
 
 	// merge k files at the time until one left
 	for currentLevelFiles > 1 {
 		for i := 0; i < currentLevelFiles; i++ {
-			if len(files) >= maxLinesInMem {
+			if pos + 1 >= maxLinesInMem {
 				if err := mergeFiles(); err != nil {
 					return err
 				}
@@ -217,17 +227,23 @@ func LinesInPlace(maxLinesInMem int, manager FileOpener) error {
 			if err != nil {
 				return err
 			}
-			files = append(files, fileWithCloser{f:f, c:c})
+			files[pos] = fileWithCloser{f:f, c:c}
+			pos++
 		}
 		if len(files) > 0 {
 			if err := mergeFiles(); err != nil {
 				return err
 			}
 		}
+		if currentLevelFiles <= maxLinesInMem {
+			return nil
+		}
 		age++
 		currentLevelFiles = newCurrentFiles
 		newCurrentFiles = 0
 	}
+
+
 
 	// move single last file into old one
 	dst, dstCloser, err := manager.NewTempFile(0, 0)
